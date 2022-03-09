@@ -5,10 +5,12 @@ import (
 	"TelegramFileUploader/types"
 	"context"
 	"fmt"
+	"github.com/cheggaaa/pb/v3"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
+	"os"
 )
 
 // BeginBot starts the bot and tries to upload the file to Telegram
@@ -17,7 +19,7 @@ func BeginBot(ctx context.Context, client *telegram.Client) error {
 	u := uploader.NewUploader(api)
 	sender := message.NewSender(api).WithUploader(u)
 	// Upload the file
-	upload, err := u.FromPath(ctx, filePath)
+	upload, err := uploadWithProgress(ctx, u)
 	if err != nil {
 		return fmt.Errorf("upload %q: %w", filePath, err)
 	}
@@ -52,4 +54,27 @@ func BeginBot(ctx context.Context, client *telegram.Client) error {
 	_, err = sender.Resolve(receiverID).Media(ctx, media)
 	// Done
 	return err
+}
+
+func uploadWithProgress(ctx context.Context, u *uploader.Uploader) (tg.InputFileClass, error) {
+	// Open file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	// Get file size
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	// Set up the progress bar
+	bar := pb.Full.Start64(fileInfo.Size())
+	bar.Set(pb.SIBytesPrefix, true)
+	barReader := bar.NewProxyReader(file)
+	defer bar.Finish()
+	// Upload the file
+	return u.Upload(ctx, uploader.NewUpload(fileInfo.Name(), barReader, fileInfo.Size()))
 }
